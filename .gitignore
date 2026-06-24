@@ -146,3 +146,9 @@ static/snapshots/
 static/clips/
 snapshots/
 clips/
+
+# Video files
+*.mp4
+*.avi
+*.mov
+*.mkv

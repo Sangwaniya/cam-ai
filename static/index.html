@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PIDS Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 24px; }
+        
+        /* Header */
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        .header h1 { font-size: 1.6rem; font-weight: 700; background: linear-gradient(135deg, #f0f0f0, #888); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header p { color: #666; font-size: 0.85rem; margin-top: 4px; }
+        .header-actions { display: flex; gap: 12px; }
+        
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 600; font-size: 0.85rem; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; gap: 8px; }
+        .btn:hover { transform: translateY(-1px); }
+        .btn-draw { background: linear-gradient(135deg, #eab308, #ca8a04); color: #000; box-shadow: 0 4px 15px rgba(234,179,8,0.3); }
+        .btn-draw.active { background: linear-gradient(135deg, #22c55e, #16a34a); color: #fff; box-shadow: 0 4px 15px rgba(34,197,94,0.3); }
+        .btn-shutdown { background: linear-gradient(135deg, #dc2626, #991b1b); color: #fff; box-shadow: 0 4px 15px rgba(220,38,38,0.3); }
+        .btn-toggle { background: #222; color: #aaa; border: 1px solid #333; box-shadow: none; }
+        .btn-toggle.on { background: rgba(34,197,94,0.15); color: #22c55e; border-color: #22c55e; }
+        
+        /* Drawing toolbar */
+        .draw-toolbar { 
+            display: none; background: rgba(20,20,20,0.95); backdrop-filter: blur(20px); 
+            padding: 16px 20px; margin-bottom: 20px; border-radius: 12px; 
+            border: 1px solid rgba(234,179,8,0.3); 
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            animation: slideDown 0.3s ease;
+        }
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        .draw-toolbar.visible { display: block; }
+        .draw-toolbar .row { display: flex; justify-content: space-between; align-items: center; }
+        .draw-toolbar .hint { color: #aaa; font-size: 0.85rem; }
+        .draw-toolbar .hint strong { color: #eab308; }
+        .draw-toolbar .hint kbd { 
+            background: #333; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; 
+            border: 1px solid #555; font-family: 'Inter', sans-serif; 
+        }
+        
+        /* Video Grid */
+        .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+        .video-card { 
+            background: #141414; border-radius: 12px; overflow: hidden; 
+            border: 1px solid #222; transition: border-color 0.3s ease; position: relative;
+        }
+        .video-card:hover { border-color: #333; }
+        .video-card.draw-target { border-color: #eab308 !important; box-shadow: 0 0 20px rgba(234,179,8,0.15); }
+        .video-wrapper { position: relative; }
+        .video-card img { width: 100%; display: block; }
+        .video-card .card-footer { 
+            padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; 
+            background: #1a1a1a; border-top: 1px solid #222; 
+        }
+        .video-card .card-footer h3 { font-size: 0.9rem; font-weight: 600; }
+        .video-card .card-footer .roi-badge { 
+            font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; 
+            background: rgba(234,179,8,0.15); color: #eab308; font-weight: 500;
+            display: none;
+        }
+        .video-card .card-footer .roi-badge.visible { display: inline-block; }
+        .video-card .card-footer .roi-actions { display: flex; gap: 6px; }
+        .roi-delete-btn { 
+            background: rgba(220,38,38,0.15); color: #ef4444; border: none; 
+            padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; 
+            cursor: pointer; transition: background 0.2s; display: none;
+        }
+        .roi-delete-btn.visible { display: inline-block; }
+        .roi-delete-btn:hover { background: rgba(220,38,38,0.3); }
+        
+        .draw-canvas { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            display: none; cursor: crosshair; z-index: 5;
+        }
+        
+        .banner { 
+            position: absolute; top: 12px; left: 12px; right: 12px; 
+            background: rgba(220,38,38,0.9); backdrop-filter: blur(4px);
+            color: white; text-align: center; font-weight: 700; 
+            padding: 10px; border-radius: 8px; display: none; z-index: 10; 
+            font-size: 0.95rem; animation: bannerPulse 0.5s ease;
+        }
+        @keyframes bannerPulse { 0% { transform: scale(0.95); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        
+        /* Alert Feed */
+        .alert-feed { 
+            margin-top: 20px; background: #141414; padding: 20px; 
+            border-radius: 12px; max-height: 280px; overflow-y: auto; 
+            border: 1px solid #222;
+        }
+        .alert-feed h2 { font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: #888; }
+        .alert-item { 
+            border-bottom: 1px solid #1e1e1e; padding: 10px 0; 
+            font-family: 'Inter', monospace; font-size: 0.85rem; color: #aaa;
+        }
+        .animal-alert { color: #fb923c; }
+        .human-alert { color: #f87171; }
+        .object-alert { color: #60a5fa; }
+        
+        /* Toast notification */
+        .toast { 
+            position: fixed; bottom: 24px; right: 24px; padding: 14px 20px; 
+            border-radius: 10px; font-size: 0.85rem; font-weight: 500; z-index: 100; 
+            animation: toastIn 0.3s ease; box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+        }
+        .toast.success { background: #166534; color: #bbf7d0; border: 1px solid #22c55e; }
+        .toast.info { background: #1e3a5f; color: #93c5fd; border: 1px solid #3b82f6; }
+        @keyframes toastIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>Perimeter Intrusion Detection System</h1>
+            <p>Tier-1 CPU Motion Gate &bull; Tier-2 GPU AI Scanner &bull; ROI Boundary Enforcement</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-toggle on" id="sound-toggle">🔊 Sound On</button>
+            <button class="btn btn-toggle on" id="motion-toggle">👁 Motion View</button>
+            <button class="btn btn-draw" id="draw-btn">✏️ Draw ROI</button>
+            <button class="btn btn-shutdown" id="shutdown-btn">⏻ Power Off</button>
+        </div>
+    </div>
+    
+    <div class="draw-toolbar" id="draw-toolbar">
+        <div class="row">
+            <div class="hint">
+                <strong>Click</strong> on the <kbd>right side</kbd> (color video) to place points &bull; 
+                <strong>Double-click</strong> to close the shape &bull; 
+                <strong>Esc</strong> to cancel
+            </div>
+            <div id="draw-status" style="color: #eab308; font-weight: 600; font-size: 0.85rem;">Select a camera...</div>
+        </div>
+    </div>
+
+    <div class="grid" id="video-grid">
+        <div class="video-card" id="cam1-card" data-cam="cam1">
+            <div class="banner" id="cam1-banner">⚠️ INTRUSION DETECTED ⚠️</div>
+            <div class="video-wrapper">
+                <img src="/video/cam1" alt="cam1">
+            </div>
+            <div class="card-footer">
+                <h3>Intersection Crossing (cam1)</h3>
+                <div class="roi-actions">
+                    <span class="roi-badge" id="cam1-roi-badge">ROI Active</span>
+                    <button class="roi-delete-btn" id="cam1-roi-delete" data-cam="cam1">✕ Clear ROI</button>
+                </div>
+            </div>
+        </div>
+        <div class="video-card" id="cam2-card" data-cam="cam2">
+            <div class="banner" id="cam2-banner">⚠️ INTRUSION DETECTED ⚠️</div>
+            <div class="video-wrapper">
+                <img src="/video/cam2" alt="cam2">
+            </div>
+            <div class="card-footer">
+                <h3>Subway Staircase (cam2)</h3>
+                <div class="roi-actions">
+                    <span class="roi-badge" id="cam2-roi-badge">ROI Active</span>
+                    <button class="roi-delete-btn" id="cam2-roi-delete" data-cam="cam2">✕ Clear ROI</button>
+                </div>
+            </div>
+        </div>
+        <div class="video-card" id="cam3-card" data-cam="cam3">
+            <div class="banner" id="cam3-banner">⚠️ INTRUSION DETECTED ⚠️</div>
+            <div class="video-wrapper">
+                <img src="/video/cam3" alt="cam3">
+            </div>
+            <div class="card-footer">
+                <h3>Worker Zone (cam3)</h3>
+                <div class="roi-actions">
+                    <span class="roi-badge" id="cam3-roi-badge">ROI Active</span>
+                    <button class="roi-delete-btn" id="cam3-roi-delete" data-cam="cam3">✕ Clear ROI</button>
+                </div>
+            </div>
+        </div>
+        <div class="video-card" id="cam4-card" data-cam="cam4">
+            <div class="banner" id="cam4-banner">⚠️ INTRUSION DETECTED ⚠️</div>
+            <div class="video-wrapper">
+                <img src="/video/cam4" alt="cam4">
+            </div>
+            <div class="card-footer">
+                <h3>Hallway Camera (cam4)</h3>
+                <div class="roi-actions">
+                    <span class="roi-badge" id="cam4-roi-badge">ROI Active</span>
+                    <button class="roi-delete-btn" id="cam4-roi-delete" data-cam="cam4">✕ Clear ROI</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="alert-feed">
+        <h2>Live Event Feed</h2>
+        <div id="alerts"></div>
+    </div>
+
+    <script>
+    // ==========================================
+    // ROI Drawing Engine — Production Quality
+    // ==========================================
+    
+    // Per-camera state: { camId: { points: [...], canvas: HTMLCanvasElement, closed: bool } }
+    const cameraROIs = {};
+    let isDrawMode = false;
+    let activeCamId = null;
+    let drawingPoints = [];  // Points currently being drawn (before closing)
+    let soundEnabled = true;
+    let motionViewEnabled = true;
+    
+    // Sound toggle
+    document.getElementById('sound-toggle').addEventListener('click', () => {
+        soundEnabled = !soundEnabled;
+        const btn = document.getElementById('sound-toggle');
+        btn.textContent = soundEnabled ? '🔊 Sound On' : '🔇 Sound Off';
+        btn.classList.toggle('on', soundEnabled);
+        showToast(soundEnabled ? 'Sound enabled' : 'Sound muted', 'info');
+    });
+    
+    // Motion view toggle
+    document.getElementById('motion-toggle').addEventListener('click', async () => {
+        motionViewEnabled = !motionViewEnabled;
+        const btn = document.getElementById('motion-toggle');
+        btn.textContent = motionViewEnabled ? '👁 Motion View' : '👁‍🗨 Color Only';
+        btn.classList.toggle('on', motionViewEnabled);
+        try {
+            await fetch(`/api/toggle-motion?show=${motionViewEnabled}`, { method: 'POST' });
+            showToast(motionViewEnabled ? 'Motion view enabled' : 'Showing color feed only', 'info');
+        } catch(e) {}
+    });
+    
+    function showToast(msg, type='success') {
+        const t = document.createElement('div');
+        t.className = `toast ${type}`;
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 3000);
+    }
+    
+    // Initialize canvases for each video card
+    document.querySelectorAll('.video-card').forEach(card => {
+        const camId = card.dataset.cam;
+        const wrapper = card.querySelector('.video-wrapper');
+        const img = card.querySelector('img');
+        
+        const canvas = document.createElement('canvas');
+        canvas.className = 'draw-canvas';
+        canvas.dataset.cam = camId;
+        wrapper.appendChild(canvas);
+        
+        cameraROIs[camId] = { points: null, canvas: canvas, closed: false };
+        
+        // Click to place points
+        canvas.addEventListener('click', (e) => {
+            if (!isDrawMode) return;
+            
+            // Scale click to canvas coordinates
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+            
+            const halfWidth = canvas.width / 2;
+            if (motionViewEnabled && x < halfWidth) return; // Ignore clicks on left pane in split-screen mode
+            
+            // Lock to this camera
+            if (activeCamId && activeCamId !== camId) return;
+            if (!activeCamId) {
+                activeCamId = camId;
+                card.classList.add('draw-target');
+                document.getElementById('draw-status').textContent = `Drawing on ${camId}...`;
+            }
+            
+            drawingPoints.push({ x, y });
+            redrawCanvas(camId);
+        });
+        
+        // Double-click to close polygon
+        canvas.addEventListener('dblclick', (e) => {
+            if (!isDrawMode || activeCamId !== camId) return;
+            if (drawingPoints.length < 3) {
+                showToast('Need at least 3 points to form an area.', 'info');
+                return;
+            }
+            
+            // Remove the extra point added by the second click of dblclick
+            drawingPoints.pop();
+            
+            // Save and close
+            cameraROIs[camId].points = [...drawingPoints];
+            cameraROIs[camId].closed = true;
+            
+            // Calculate percentages based on view mode
+            const height = canvas.height;
+            let roi;
+            if (motionViewEnabled) {
+                // Split-screen: relative to the RIGHT pane
+                const halfWidth = canvas.width / 2;
+                roi = drawingPoints.map(p => [
+                    Math.max(0, Math.min(1, (p.x - halfWidth) / halfWidth)),
+                    Math.max(0, Math.min(1, p.y / height))
+                ]);
+            } else {
+                // Color-only: relative to FULL canvas
+                const fullWidth = canvas.width;
+                roi = drawingPoints.map(p => [
+                    Math.max(0, Math.min(1, p.x / fullWidth)),
+                    Math.max(0, Math.min(1, p.y / height))
+                ]);
+            }
+            
+            // Push to backend API
+            pushROI(camId, roi);
+            
+            // Reset drawing state but keep polygon visible
+            drawingPoints = [];
+            activeCamId = null;
+            card.classList.remove('draw-target');
+            document.getElementById('draw-status').textContent = 'Select a camera...';
+            
+            // Show ROI badge and delete button
+            document.getElementById(`${camId}-roi-badge`).classList.add('visible');
+            document.getElementById(`${camId}-roi-delete`).classList.add('visible');
+            
+            // Redraw final closed polygon
+            redrawCanvas(camId);
+        });
+        
+        // Mouse move for live preview line
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDrawMode || activeCamId !== camId || drawingPoints.length === 0) return;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+            redrawCanvas(camId, { x, y });
+        });
+    });
+    
+    function redrawCanvas(camId, mousePoint = null) {
+        const state = cameraROIs[camId];
+        const canvas = state.canvas;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Dim left pane during draw mode only if motion view is active
+        if (isDrawMode && motionViewEnabled) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(0, 0, canvas.width / 2, canvas.height);
+        }
+        
+        // Draw existing closed polygon (if any)
+        if (state.closed && state.points && state.points.length > 2) {
+            drawPolygon(ctx, state.points, true);
+        }
+        
+        // Draw in-progress polygon
+        if (drawingPoints.length > 0 && activeCamId === camId) {
+            drawPolygon(ctx, drawingPoints, false, mousePoint);
+        }
+    }
+    
+    function drawPolygon(ctx, points, isClosed, mousePoint = null) {
+        if (points.length === 0) return;
+        
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            ctx.lineTo(points[i].x, points[i].y);
+        }
+        if (mousePoint && !isClosed) {
+            ctx.lineTo(mousePoint.x, mousePoint.y);
+        }
+        ctx.closePath();
+        
+        // Fill
+        ctx.fillStyle = isClosed ? 'rgba(234, 179, 8, 0.2)' : 'rgba(234, 179, 8, 0.12)';
+        ctx.fill();
+        
+        // Stroke
+        ctx.strokeStyle = isClosed ? '#eab308' : 'rgba(234, 179, 8, 0.7)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash(isClosed ? [] : [6, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // Anchor dots
+        points.forEach((p, i) => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, isClosed ? 4 : 5, 0, Math.PI * 2);
+            ctx.fillStyle = i === 0 ? '#22c55e' : '#ef4444';
+            ctx.fill();
+            if (!isClosed && i === 0 && points.length > 1) {
+                // Glow ring on first point to hint "double-click near here to close"
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(34, 197, 94, 0.5)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        });
+    }
+    
+    // Toggle draw mode
+    document.getElementById('draw-btn').addEventListener('click', () => {
+        isDrawMode = !isDrawMode;
+        const btn = document.getElementById('draw-btn');
+        const toolbar = document.getElementById('draw-toolbar');
+        
+        if (isDrawMode) {
+            btn.textContent = '✅ Exit Draw Mode';
+            btn.classList.add('active');
+            toolbar.classList.add('visible');
+            
+            // Show all canvases and size them
+            document.querySelectorAll('.draw-canvas').forEach(c => {
+                c.style.display = 'block';
+                const wrapper = c.parentElement;
+                c.width = wrapper.clientWidth;
+                c.height = wrapper.clientHeight;
+                // Redraw existing polygons
+                redrawCanvas(c.dataset.cam);
+            });
+        } else {
+            exitDrawMode();
+        }
+    });
+    
+    function exitDrawMode() {
+        isDrawMode = false;
+        drawingPoints = [];
+        activeCamId = null;
+        
+        const btn = document.getElementById('draw-btn');
+        btn.textContent = '✏️ Draw ROI';
+        btn.classList.remove('active');
+        document.getElementById('draw-toolbar').classList.remove('visible');
+        document.querySelectorAll('.video-card').forEach(c => c.classList.remove('draw-target'));
+        
+        // Hide canvases that have no closed polygon
+        Object.keys(cameraROIs).forEach(camId => {
+            const state = cameraROIs[camId];
+            if (!state.closed) {
+                state.canvas.style.display = 'none';
+            } else {
+                // Redraw without the left-pane dimming
+                redrawCanvas(camId);
+            }
+        });
+    }
+    
+    // Escape key cancels
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isDrawMode) {
+            drawingPoints = [];
+            if (activeCamId) {
+                document.querySelector(`[data-cam="${activeCamId}"]`).classList.remove('draw-target');
+                redrawCanvas(activeCamId);
+            }
+            activeCamId = null;
+            document.getElementById('draw-status').textContent = 'Select a camera...';
+        }
+    });
+    
+    // Delete ROI buttons
+    document.querySelectorAll('.roi-delete-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const camId = btn.dataset.cam;
+            cameraROIs[camId].points = null;
+            cameraROIs[camId].closed = false;
+            
+            const canvas = cameraROIs[camId].canvas;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            canvas.style.display = 'none';
+            
+            document.getElementById(`${camId}-roi-badge`).classList.remove('visible');
+            document.getElementById(`${camId}-roi-delete`).classList.remove('visible');
+            
+            // Push null to backend to clear ROI
+            await pushROI(camId, null);
+            showToast(`ROI cleared for ${camId}`);
+        });
+    });
+    
+    // Push ROI to backend
+    async function pushROI(camId, roi) {
+        try {
+            const res = await fetch('/api/roi', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stream_id: camId, roi: roi })
+            });
+            const data = await res.json();
+            if (data.status === 'ok') {
+                showToast(`ROI saved for ${camId} — enforced immediately!`);
+            }
+        } catch (err) {
+            showToast('Failed to save ROI', 'info');
+        }
+    }
+    
+    // Shutdown
+    document.getElementById('shutdown-btn').addEventListener('click', async () => {
+        if (confirm('Shut down the AI surveillance engine?')) {
+            // 1. Close WebSocket to prevent dangling server-side connections
+            try { ws.close(); } catch(e) {}
+
+            // 2. Stop all MJPEG streams by clearing img.src (kills HTTP connections)
+            document.querySelectorAll('img[src^="/video/"]').forEach(img => {
+                img.src = '';
+            });
+
+            // 3. Brief pause to let connections close on the server side
+            await new Promise(r => setTimeout(r, 200));
+
+            // 4. Show shutdown screen
+            document.body.innerHTML = `
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:#0a0a0a;">
+                    <h1 style="color:#ef4444;font-size:2rem;">System Shutting Down</h1>
+                    <p style="color:#666;margin-top:12px;">You can close this tab. Run <code>python app.py</code> to restart.</p>
+                </div>`;
+
+            // 5. Send shutdown request (server will delay SIGINT so this response completes)
+            try { await fetch('/api/shutdown', { method: 'POST' }); } catch(e) {}
+        }
+    });
+    
+    // ==========================================
+    // WebSocket — Real-time Event Feed
+    // ==========================================
+    const ws = new WebSocket(`ws://${location.host}/ws/events`);
+    const alertsDiv = document.getElementById('alerts');
+    
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // Distinct alarm sounds per detection type
+    function playAlarm(bucket) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const t = audioCtx.currentTime;
+        const gain = audioCtx.createGain();
+        gain.connect(audioCtx.destination);
+        gain.gain.setValueAtTime(0.3, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.6);
+        
+        if (bucket === 'human') {
+            // Urgent rising siren — two-tone alternating
+            const o1 = audioCtx.createOscillator();
+            o1.type = 'sawtooth';
+            o1.frequency.setValueAtTime(800, t);
+            o1.frequency.linearRampToValueAtTime(1200, t + 0.15);
+            o1.frequency.linearRampToValueAtTime(800, t + 0.3);
+            o1.frequency.linearRampToValueAtTime(1200, t + 0.45);
+            o1.connect(gain);
+            o1.start(t);
+            o1.stop(t + 0.5);
+        } else if (bucket === 'animal') {
+            // Double chirp — short high-pitched beeps
+            for (let i = 0; i < 2; i++) {
+                const o = audioCtx.createOscillator();
+                o.type = 'sine';
+                o.frequency.setValueAtTime(1400, t + i * 0.18);
+                o.frequency.exponentialRampToValueAtTime(900, t + i * 0.18 + 0.12);
+                const g = audioCtx.createGain();
+                g.gain.setValueAtTime(0.25, t + i * 0.18);
+                g.gain.exponentialRampToValueAtTime(0.01, t + i * 0.18 + 0.12);
+                o.connect(g).connect(audioCtx.destination);
+                o.start(t + i * 0.18);
+                o.stop(t + i * 0.18 + 0.12);
+            }
+        } else {
+            // Deep warning pulse — low rumble for objects/vehicles
+            const o = audioCtx.createOscillator();
+            o.type = 'triangle';
+            o.frequency.setValueAtTime(220, t);
+            o.frequency.linearRampToValueAtTime(160, t + 0.4);
+            o.connect(gain);
+            o.start(t);
+            o.stop(t + 0.45);
+        }
+    }
+
+    ws.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        if (soundEnabled) playAlarm(data.bucket);
+        
+        const banner = document.getElementById(`${data.stream_id}-banner`);
+        if (banner) {
+            // Color banner by type
+            if (data.bucket === 'human') banner.style.background = 'rgba(220,38,38,0.9)';
+            else if (data.bucket === 'animal') banner.style.background = 'rgba(234,179,8,0.9)';
+            else banner.style.background = 'rgba(59,130,246,0.9)';
+            
+            banner.textContent = `⚠️ ${data.bucket.toUpperCase()} INTRUSION: ${data.class} ⚠️`;
+            banner.style.display = 'block';
+            setTimeout(() => banner.style.display = 'none', 3000);
+        }
+        
+        const div = document.createElement('div');
+        let alertClass = 'human-alert';
+        let icon = '🚨';
+        if (data.bucket === 'animal') { alertClass = 'animal-alert'; icon = '🐾'; }
+        else if (data.bucket === 'object') { alertClass = 'object-alert'; icon = '📦'; }
+        
+        div.className = `alert-item ${alertClass}`;
+        const timeStr = new Date(data.ts * 1000).toLocaleTimeString();
+        div.innerHTML = `${icon} <strong>[${timeStr}]</strong> ${data.stream_name}: <strong>${data.bucket}</strong> (${data.class}) crossed ${data.direction} [${(data.conf*100).toFixed(1)}%]`;
+        alertsDiv.prepend(div);
+    };
+    </script>
+</body>
+</html>

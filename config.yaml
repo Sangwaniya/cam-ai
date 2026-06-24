@@ -1,0 +1,99 @@
+buckets:
+  animal:
+  - dog
+  - cat
+  - cow
+  - horse
+  - sheep
+  - elephant
+  - bear
+  - zebra
+  - giraffe
+  human:
+  - person
+  object:
+  - car
+  - truck
+  - motorcycle
+  - bicycle
+  - bus
+  - boat
+  - backpack
+  - suitcase
+classes_of_interest:
+- person
+- dog
+- cat
+- cow
+- horse
+- sheep
+- elephant
+- bear
+- zebra
+- giraffe
+- car
+- truck
+- motorcycle
+- bicycle
+- bus
+- boat
+- backpack
+- suitcase
+streams:
+  cam1:
+    name: Intersection Crossing
+    priority: 10
+    roi: null
+    source: test_video.mp4
+    tripwire:
+    - - 380
+      - -1000
+    - - 380
+      - 2000
+  cam2:
+    name: Subway Staircase
+    priority: 8
+    roi:
+    - - 0.15903614457831325
+      - 0.7668005354752342
+    - - 0.15903614457831325
+      - 0.7668005354752342
+    - - 0.8819277108433735
+      - 0.762516733601071
+    - - 0.8650602409638555
+      - 0.055689424364123156
+    - - 0.13012048192771083
+      - 0.07282463186077644
+    - - 0.12771084337349398
+      - 0.2527443105756359
+    source: test_video_2.mp4
+    tripwire:
+    - - -1000
+      - 200
+    - - 2000
+      - 200
+  cam3:
+    name: Pedestrian Walkway
+    priority: 5
+    roi: null
+    source: test_video_3.mp4
+    tripwire:
+    - - 250
+      - -1000
+    - - 250
+      - 2000
+  cam4:
+    name: Hallway Camera
+    priority: 5
+    roi: null
+    source: test_video_4.mp4
+    tripwire:
+    - - -1000
+      - 300
+    - - 2000
+      - 300
+system:
+  log_level: INFO
+  max_batch_size: 4
+  motion_fps: 5
+  motion_threshold: 500
