@@ -95,7 +95,14 @@
         .alert-item { 
             border-bottom: 1px solid #1e1e1e; padding: 10px 0; 
             font-family: 'Inter', monospace; font-size: 0.85rem; color: #aaa;
+            display: flex; align-items: center; gap: 12px;
         }
+        .alert-thumb {
+            width: 72px; height: 48px; object-fit: cover; border-radius: 6px;
+            border: 1px solid #333; cursor: pointer; flex: none; transition: transform 0.15s;
+        }
+        .alert-thumb:hover { transform: scale(1.05); border-color: #555; }
+        .alert-text { flex: 1; }
         .animal-alert { color: #fb923c; }
         .human-alert { color: #f87171; }
         .object-alert { color: #60a5fa; }
@@ -109,6 +116,43 @@
         .toast.success { background: #166534; color: #bbf7d0; border: 1px solid #22c55e; }
         .toast.info { background: #1e3a5f; color: #93c5fd; border: 1px solid #3b82f6; }
         @keyframes toastIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* System load stat bar */
+        .statbar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+        .stat { background: #141414; border: 1px solid #222; border-radius: 8px; padding: 8px 14px; font-size: 0.85rem; display: flex; gap: 8px; align-items: center; }
+        .stat-label { color: #666; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        .stat .bar { width: 80px; height: 6px; border-radius: 3px; background: #222; overflow: hidden; display: inline-block; vertical-align: middle; }
+        .stat .bar > span { display: block; height: 100%; background: #22c55e; width: 0%; transition: width .4s, background .4s; }
+        #stat-contention { color: #22c55e; font-weight: 600; }
+        #stat-contention.warn { color: #f59e0b; background: rgba(245,158,11,0.12); border-color: #f59e0b; }
+
+        /* Per-camera status line */
+        .video-card .card-footer { flex-wrap: wrap; }
+        .cam-status { flex-basis: 100%; margin-top: 8px; font-size: 0.72rem; color: #888; display: flex; gap: 8px; align-items: center; }
+        .cam-status .dot { width: 8px; height: 8px; border-radius: 50%; background: #3f3f46; flex: none; }
+        .cam-status .dot.online { background: #22c55e; }
+        .cam-status .dot.offline { background: #ef4444; }
+        .cam-status .rec { color: #ef4444; font-weight: 700; }
+
+        /* Incident history */
+        .history-feed { margin-top: 20px; background: #141414; padding: 20px; border-radius: 12px; border: 1px solid #222; max-height: 340px; overflow-y: auto; }
+        .history-feed h2 { font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: #888; }
+        .history-feed h2 small { color: #555; font-weight: 400; font-size: 0.76rem; margin-left: 8px; }
+        .incident { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid #1e1e1e; cursor: pointer; }
+        .incident:hover { background: #181818; }
+        .incident img { width: 88px; height: 58px; object-fit: cover; border-radius: 6px; border: 1px solid #333; flex: none; }
+        .incident .meta { flex: 1; font-size: 0.82rem; color: #bbb; line-height: 1.5; }
+        .incident .when { color: #666; font-size: 0.75rem; }
+        .incident .play { color: #22c55e; font-weight: 700; font-size: 0.8rem; flex: none; }
+
+        /* Footage modal */
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; align-items: center; justify-content: center; }
+        .modal.open { display: flex; }
+        .modal-box { background: #141414; border: 1px solid #333; border-radius: 12px; width: min(820px, 92vw); overflow: hidden; }
+        .modal-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #222; font-size: 0.9rem; }
+        .modal-head button { background: none; border: none; color: #aaa; font-size: 1.1rem; cursor: pointer; }
+        .modal-box video { width: 100%; display: block; background: #000; max-height: 60vh; }
+        .modal-meta { padding: 12px 16px; font-size: 0.82rem; color: #aaa; line-height: 1.5; }
     </style>
 </head>
 <body>
@@ -125,6 +169,13 @@
         </div>
     </div>
     
+    <div class="statbar" id="statbar">
+        <div class="stat"><span class="stat-label">GPU</span><span id="stat-gpu">—</span></div>
+        <div class="stat"><span class="stat-label">CPU</span><span id="stat-cpu">—</span></div>
+        <div class="stat"><span class="stat-label">GPU slots</span><span id="stat-slots">—</span></div>
+        <div class="stat" id="stat-contention">Capacity OK</div>
+    </div>
+
     <div class="draw-toolbar" id="draw-toolbar">
         <div class="row">
             <div class="hint">
@@ -194,6 +245,19 @@
     <div class="alert-feed">
         <h2>Live Event Feed</h2>
         <div id="alerts"></div>
+    </div>
+
+    <div class="history-feed">
+        <h2>Incident History <small>click an incident to view footage</small></h2>
+        <div id="history"></div>
+    </div>
+
+    <div class="modal" id="clip-modal">
+        <div class="modal-box">
+            <div class="modal-head"><span id="modal-title">Incident footage</span><button id="modal-close">✕</button></div>
+            <video id="modal-video" controls autoplay playsinline></video>
+            <div id="modal-meta" class="modal-meta"></div>
+        </div>
     </div>
 
     <script>
@@ -585,6 +649,7 @@
 
     ws.onmessage = function(event) {
         const data = JSON.parse(event.data);
+        if (data.type === 'incident') { renderIncident(data, true); return; }
         if (soundEnabled) playAlarm(data.bucket);
         
         const banner = document.getElementById(`${data.stream_id}-banner`);
@@ -607,9 +672,119 @@
         
         div.className = `alert-item ${alertClass}`;
         const timeStr = new Date(data.ts * 1000).toLocaleTimeString();
-        div.innerHTML = `${icon} <strong>[${timeStr}]</strong> ${data.stream_name}: <strong>${data.bucket}</strong> (${data.class}) crossed ${data.direction} [${(data.conf*100).toFixed(1)}%]`;
+        const thumb = data.snapshot
+            ? `<img src="${data.snapshot}" class="alert-thumb" title="Click to open full snapshot" onclick="window.open('${data.snapshot}','_blank')">`
+            : '';
+        div.innerHTML = `${thumb}<div class="alert-text">${icon} <strong>[${timeStr}]</strong> ${data.stream_name}: <strong>${data.bucket}</strong> (${data.class}) crossed ${data.direction} [${(data.conf*100).toFixed(1)}%]</div>`;
         alertsDiv.prepend(div);
     };
+
+    // ===== Incident history + footage modal =====
+    const historyDiv = document.getElementById('history');
+    const seenIncidents = new Set();
+    const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString();
+    const fmtDateTime = ts => new Date(ts * 1000).toLocaleString();
+
+    function renderIncident(inc, prepend) {
+        if (!inc || seenIncidents.has(inc.id)) return;
+        seenIncidents.add(inc.id);
+        const buckets = (inc.objects || []).map(o => o.bucket).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+        const n = (inc.objects || []).length;
+        const dur = inc.duration != null ? `${inc.duration}s` : '';
+        const thumb = inc.snapshot ? `<img src="${inc.snapshot}">` : '';
+        const div = document.createElement('div');
+        div.className = 'incident';
+        div.innerHTML = `${thumb}
+            <div class="meta">
+                <strong>${inc.stream_name}</strong> — ${buckets || 'object'}
+                <span class="when">(${n} event${n === 1 ? '' : 's'})</span><br>
+                <span class="when">${inc.ts_start ? fmtTime(inc.ts_start) : '?'} → ${inc.ts_end ? fmtTime(inc.ts_end) : '?'} · ${dur}</span>
+            </div>
+            <div class="play">${inc.clip ? '▶ Footage' : 'no clip'}</div>`;
+        if (inc.clip) div.onclick = () => openClip(inc);
+        if (prepend) historyDiv.prepend(div); else historyDiv.appendChild(div);
+    }
+
+    async function loadHistory() {
+        try {
+            const events = await (await fetch('/api/events?limit=100')).json();
+            // API returns newest-first; reverse so prepend leaves newest on top
+            events.slice().reverse().forEach(inc => renderIncident(inc, true));
+        } catch (e) { /* ignore */ }
+    }
+
+    const modal = document.getElementById('clip-modal');
+    function openClip(inc) {
+        document.getElementById('modal-title').textContent = `${inc.stream_name} — incident footage`;
+        const v = document.getElementById('modal-video');
+        v.src = inc.clip;
+        const objs = (inc.objects || []).map(o => `${o.bucket}/${o.class}`).join(', ');
+        document.getElementById('modal-meta').innerHTML =
+            `Detected ${inc.ts_start ? fmtDateTime(inc.ts_start) : '?'} → ${inc.ts_end ? fmtTime(inc.ts_end) : '?'} · ${inc.duration != null ? inc.duration + 's' : ''}<br>Objects: ${objs}`;
+        modal.classList.add('open');
+        v.play().catch(() => {});
+    }
+    function closeClip() {
+        modal.classList.remove('open');
+        const v = document.getElementById('modal-video');
+        v.pause(); v.src = '';
+    }
+    document.getElementById('modal-close').addEventListener('click', closeClip);
+    modal.addEventListener('click', e => { if (e.target === modal) closeClip(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeClip(); });
+
+    // ===== System load + per-camera health =====
+    // Add a status line to each camera footer
+    document.querySelectorAll('.video-card').forEach(card => {
+        const footer = card.querySelector('.card-footer');
+        if (!footer) return;
+        const s = document.createElement('div');
+        s.className = 'cam-status';
+        s.id = `${card.dataset.cam}-status`;
+        s.innerHTML = `<span class="dot"></span><span class="txt">—</span>`;
+        footer.appendChild(s);
+    });
+
+    function bar(pct) {
+        if (pct == null) return 'N/A';
+        const c = pct > 85 ? '#ef4444' : (pct > 60 ? '#f59e0b' : '#22c55e');
+        return `<span class="bar"><span style="width:${pct}%;background:${c}"></span></span> ${pct}%`;
+    }
+
+    async function pollStats() {
+        try {
+            const data = await (await fetch('/api/stats')).json();
+            const L = data.load || {};
+            document.getElementById('stat-gpu').innerHTML = L.gpu_available ? bar(L.gpu_util) : 'N/A (CPU mode)';
+            document.getElementById('stat-cpu').innerHTML = bar(L.cpu);
+            document.getElementById('stat-slots').textContent =
+                `${L.active_streams || 0} active / ${L.effective_slots} (cap ${L.max_slots})`;
+            const cont = document.getElementById('stat-contention');
+            if (L.contention) {
+                cont.textContent = `⚠ Contention — prioritising (by ${L.governing} load)`;
+                cont.classList.add('warn');
+            } else {
+                cont.textContent = `Capacity OK (governing: ${L.governing || '—'})`;
+                cont.classList.remove('warn');
+            }
+            const streams = data.streams || {};
+            Object.keys(streams).forEach(sid => {
+                const el = document.getElementById(`${sid}-status`);
+                if (!el) return;
+                const h = streams[sid];
+                el.querySelector('.dot').className = `dot ${h.online ? 'online' : 'offline'}`;
+                const state = h.scanning ? 'SCANNING' : (h.motion ? 'WAITING' : 'idle');
+                const rec = h.recording ? ` · <span class="rec">● REC</span>` : '';
+                el.querySelector('.txt').innerHTML = `${h.online ? 'online' : 'offline'} · ${h.fps || 0} fps · ${state}${rec}`;
+            });
+        } catch (e) { /* ignore */ }
+    }
+
+    // Initial load + polling
+    loadHistory();
+    pollStats();
+    setInterval(pollStats, 1500);
+    setInterval(loadHistory, 8000);
     </script>
 </body>
 </html>
