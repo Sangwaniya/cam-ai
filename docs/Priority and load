@@ -1,0 +1,194 @@
+# Load-Aware Priority Scheduling & Incident Recording
+
+This document explains two things added to the PIDS demo:
+
+1. **How GPU slots are allocated across cameras** (the load-aware priority scheduler).
+2. **How intrusion timestamps and footage clips are captured.**
+
+---
+
+## 1. Why a scheduler exists at all
+
+The system watches up to ~300 cameras but a single GPU server can only run the
+heavy Tier-2 model (YOLO + ByteTrack) on a limited number of streams at once
+(the "20 of 300" requirement). Tier-1 cheap motion detection runs on every
+camera on the CPU; only cameras with motion ask for a GPU slot.
+
+When more cameras have motion than there are GPU slots, we must decide **which
+cameras get the GPU**. That decision is what `BatchScheduler` makes.
+
+## 2. The core idea: prioritise *only when saturated*
+
+A naive scheduler enforces a fixed cap (e.g. always 4 streams) and constantly
+denies the rest. That wastes capacity when the GPU is idle, and it prioritises
+even when there's no need to.
+
+Instead we use an **adaptive admission controller**:
+
+- There is a hard ceiling, `max_slots` (config: `system.max_batch_size`) — the
+  most streams the hardware/licence can ever run. This represents the real "20".
+- There is a live, moving value, `effective_slots`, that starts at `max_slots`
+  and is nudged up or down every second based on **measured hardware load**.
+- A camera with motion calls `request(stream_id, priority)` each frame. The
+  scheduler ranks **all currently-demanding cameras by priority** and grants a
+  slot to the top `effective_slots` of them. Everyone else waits this frame.
+
+So prioritisation only has an effect ("bites") in two situations:
+
+1. **Demand exceeds the ceiling** — more cameras have motion than `max_slots`.
+2. **The GPU is saturated** — load is high, so `effective_slots` has shrunk
+   below the number of demanding cameras.
+
+If the GPU has headroom and demand is under the ceiling, *every* moving camera
+is scanned and nobody is deprioritised.
+
+## 3. The control loop (how `effective_slots` moves)
+
+A background sampler reads load once per `sample_interval` (default 1s) and
+applies simple proportional control with a hysteresis band:
+
+```
+load = GPU utilisation %   (or CPU % if no GPU is present)
+
+if   load > high:  effective_slots -= 1     # saturated -> shed one camera
+elif load < low:   effective_slots += 1     # headroom  -> admit one camera
+else:              hold steady              # inside [low, high] -> no change
+
+effective_slots is clamped to [min_slots, max_slots]
+```
+
+Defaults (config `system`):
+
+| Key         | Default | Meaning                                            |
+|-------------|---------|----------------------------------------------------|
+| max_batch_size | 4    | Hard ceiling on concurrent Tier-2 streams          |
+| min_slots   | 1       | Never starve the perimeter completely              |
+| gpu_high    | 85      | Above this GPU % we shed a stream                  |
+| gpu_low     | 60      | Below this GPU % we admit a stream                 |
+| cpu_high    | 90      | Same idea, used when no GPU is present             |
+| cpu_low     | 70      |                                                    |
+
+The hysteresis band (`low`..`high`) stops the controller from oscillating: it
+only reacts when load is clearly high or clearly low, and holds steady in
+between. Steps of ±1 per second keep the response gentle.
+
+### What "governs" the decision
+
+- If an NVIDIA GPU + telemetry (`nvidia-ml-py`) are present, **GPU utilisation**
+  is the governing signal — that's the true Tier-2 bottleneck.
+- If there is no GPU (e.g. a CPU-only demo laptop), **CPU %** (`psutil`) governs
+  instead, because that's the bottleneck there.
+- The `/api/stats` response reports which one is governing.
+
+## 4. How priority is decided "intelligently"
+
+Priority is not first-come-first-served and not round-robin. Each camera has a
+static `priority` in config (perimeter cameras high, interior low), and the
+scheduler grants slots strictly in priority order among the cameras that
+currently have motion:
+
+- A high-priority perimeter camera that starts moving will **displace** a
+  lower-priority interior camera from a slot the same second.
+- Ties (equal priority) are broken deterministically by stream id, so a camera
+  that holds a slot keeps it frame-to-frame instead of flickering.
+- Demand has a short TTL (`demand_ttl`, 1s): a camera that stops moving drops
+  out of the ranking automatically and frees its place.
+
+Recommended priority bands:
+
+| Band       | Example priority | Cameras                          |
+|------------|------------------|----------------------------------|
+| Critical   | 9–10             | Main gates, breach-prone walls   |
+| High       | 6–8              | Perimeter fence segments         |
+| Normal     | 3–5              | Interior yard, corridors         |
+| Low        | 0–2              | Low-risk / well-lit open areas   |
+
+## 5. What you see in the UI
+
+The dashboard header shows a live stat bar:
+
+- **GPU** utilisation % (or "N/A (CPU mode)" if no GPU) with a colour bar.
+- **CPU** utilisation %.
+- **GPU slots**: `active / effective (cap max)` — e.g. `5 active / 3 (cap 4)`.
+- A status pill: **"Capacity OK"** normally, or **"⚠ Contention — prioritising"**
+  when more cameras are demanding than there are effective slots.
+
+Each camera card shows a small status line: online/offline, current fps, and
+its current state — **SCANNING** (has a GPU slot), **WAITING** (has motion but
+was out-ranked for a slot), or **idle** — plus a **● REC** marker while an
+incident clip is being recorded.
+
+## 6. Demonstrating contention on a small machine
+
+With headroom, nothing is deprioritised — which is correct, but undramatic. To
+*show* the priority behaviour deterministically at a demo, lower the ceiling so
+demand exceeds it:
+
+```yaml
+system:
+  max_batch_size: 2     # only 2 concurrent GPU streams
+```
+
+With 4 cameras moving and priorities `cam1=10, cam2=8, cam3=5, cam4=5`, you'll
+see `cam1` and `cam2` show **SCANNING** while `cam3`/`cam4` show **WAITING**.
+Start motion on the high-priority camera and watch it take a slot from a
+low-priority one. On a saturated real GPU, `effective_slots` will additionally
+fall on its own as utilisation climbs past `gpu_high`.
+
+---
+
+## 7. Intrusion timestamps & footage clips
+
+Every intrusion now records **when the object was first seen and when it left**,
+plus a short video clip of the event.
+
+### Timestamps
+
+- The pipeline tracks `first_seen` and `last_seen` per track id.
+- The **live alert** (pushed instantly over WebSocket) carries `ts` (the moment
+  of crossing) and `ts_start` (when that object was first seen).
+- The **completed incident** (stored when the event ends) carries `ts_start`,
+  `ts_end`, and `duration` — the full "from when to when" window.
+
+### Clips
+
+`ClipRecorder` keeps a rolling **pre-event buffer** (default 3s) so footage
+starts just *before* the crossing. On the first trigger it opens a writer and
+flushes the buffer; it keeps appending frames (throttled to a target fps so the
+clip plays at real-time speed) until the triggering object has been gone for
+`linger_secs` (default 2s) or `max_secs` (default 20s) is reached.
+
+- Clips are written as **H.264 .mp4 via imageio/ffmpeg** when available (plays
+  in any browser); if that's unavailable it falls back to OpenCV `mp4v`. If
+  neither works, the incident is still recorded with its snapshot + timestamps,
+  just without a playable clip.
+- Clips are downscaled to `clips.max_width` (default 640px) to bound disk/CPU.
+
+### Where it shows up
+
+Completed incidents appear in the **Incident History** panel with a thumbnail,
+the `start → end` time, duration, and a **▶ Footage** button that opens the clip
+in a modal player. History is served from `GET /api/events` (persisted to
+`logs/events.jsonl`, so it survives restarts) and updated live as incidents
+complete.
+
+### Config (`clips` section)
+
+| Key            | Default | Meaning                                   |
+|----------------|---------|-------------------------------------------|
+| enabled        | true    | Master switch for clip recording          |
+| fps            | 15      | Clip playback fps / sampling rate         |
+| prebuffer_secs | 3       | Seconds of footage kept before the event  |
+| linger_secs    | 2       | Stop after the object is gone this long   |
+| max_secs       | 20      | Hard cap on a single clip's length        |
+| max_width      | 640     | Downscale width for recorded clips         |
+
+### Caveats
+
+- Clip timing is **real-time for live cameras (RTSP/webcam)**. For fast-read
+  **file** sources used in the demo, footage is captured at wall-clock pace but
+  the source is read faster than real-time, so file clips may look slightly
+  time-compressed. Production RTSP feeds play back accurately.
+- `imageio[ffmpeg]` downloads a static ffmpeg binary on first use. On an offline
+  deployment, install a system ffmpeg and point `IMAGEIO_FFMPEG_EXE` at it (or
+  rely on the OpenCV `mp4v` fallback).
