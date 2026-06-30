@@ -93,7 +93,21 @@ streams:
     - - 2000
       - 300
 system:
+  alert_cooldown: 3.0
+  conf: 0.35
+  cpu_high: 90
+  cpu_low: 70
+  gpu_high: 85
+  gpu_low: 60
   log_level: INFO
   max_batch_size: 4
+  min_slots: 1
   motion_fps: 5
   motion_threshold: 500
+clips:
+  enabled: true
+  fps: 15
+  linger_secs: 2
+  max_secs: 20
+  max_width: 640
+  prebuffer_secs: 3
